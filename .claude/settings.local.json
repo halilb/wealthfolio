@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:wealthfolio.app)",
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(npm test:*)"
     ]
   }
 }

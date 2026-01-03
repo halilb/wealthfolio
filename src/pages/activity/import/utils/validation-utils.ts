@@ -261,7 +261,10 @@ const activityLogicMap: Partial<Record<ActivityType, ActivityLogicConfig>> = {
   },
   [ActivityType.SPLIT]: {
     calculateSymbol: (activity) => activity.symbol,
-    calculateAmount: () => 0, // SPLIT has no cash impact according to docs
+    // Split ratio is stored in amount field (e.g., 2 for 2:1 split, 4.88 for 488:100 split)
+    // Use unitPrice as the split ratio if amount is not provided
+    calculateAmount: (activity) =>
+      activity.amount ? Math.abs(activity.amount) : activity.unitPrice ? Math.abs(activity.unitPrice) : 0,
     calculateFee: () => 0, // SPLIT typically has no fee
   },
   // ... Add configurations for other ActivityTypes (TAX, TRANSFER_IN, TRANSFER_OUT, etc.)

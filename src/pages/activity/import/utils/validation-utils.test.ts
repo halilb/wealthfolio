@@ -213,16 +213,16 @@ describe("validation-utils", () => {
       expect(activity.fee).toBe(10.0); // converted to positive
     });
 
-    it("should handle SPLIT activities with no cash impact", () => {
+    it("should handle SPLIT activities with split ratio in amount field", () => {
       const testData = [
         {
           lineNumber: "1",
           date: "2024-01-01T00:00:00.000Z",
           symbol: "AAPL",
           activityType: "SPLIT",
-          quantity: "20", // 2:1 split
-          unitPrice: "75.00", // half the previous price
-          amount: "0",
+          quantity: "20",
+          unitPrice: "2", // split ratio as fallback
+          amount: "2", // 2:1 split ratio
           fee: "0",
           currency: "USD",
         },
@@ -234,9 +234,32 @@ describe("validation-utils", () => {
       const activity = result.activities[0];
 
       expect(activity.quantity).toBe(20);
-      expect(activity.unitPrice).toBe(75.0);
-      expect(activity.amount).toBe(0); // SPLIT has no cash impact
+      expect(activity.unitPrice).toBe(2);
+      expect(activity.amount).toBe(2); // Split ratio preserved in amount field
       expect(activity.fee).toBe(0);
+    });
+
+    it("should use unitPrice as split ratio fallback when amount is 0", () => {
+      const testData = [
+        {
+          lineNumber: "1",
+          date: "2024-01-01T00:00:00.000Z",
+          symbol: "AAPL",
+          activityType: "SPLIT",
+          quantity: "20",
+          unitPrice: "2", // split ratio
+          amount: "0",
+          fee: "0",
+          currency: "USD",
+        },
+      ];
+
+      const result = validateActivityImport(testData, testMapping, "test-account", "USD");
+
+      expect(result.activities).toHaveLength(1);
+      const activity = result.activities[0];
+
+      expect(activity.amount).toBe(2); // Uses unitPrice as fallback
     });
 
     it("should handle TRANSFER_IN activities as cash activities", () => {
