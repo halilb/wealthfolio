@@ -3,7 +3,14 @@
     "allow": [
       "WebFetch(domain:wealthfolio.app)",
       "Bash(npx tsx:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "WebFetch(domain:www.tefas.gov.tr)",
+      "Bash(cargo check:*)",
+      "Bash(curl:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(cat:*)",
+      "Bash(git dfc:*)"
     ]
   }
 }

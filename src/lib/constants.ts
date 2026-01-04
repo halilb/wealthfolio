@@ -26,12 +26,13 @@ export const accountTypeSchema = z.enum([
 export const DataSource = {
   YAHOO: "YAHOO",
   MANUAL: "MANUAL",
+  TEFAS: "TEFAS",
 } as const;
 
 export type DataSource = (typeof DataSource)[keyof typeof DataSource];
 
 // Zod schema for data source validation
-export const dataSourceSchema = z.enum([DataSource.YAHOO, DataSource.MANUAL]);
+export const dataSourceSchema = z.enum([DataSource.YAHOO, DataSource.MANUAL, DataSource.TEFAS]);
 
 export const ImportFormat = {
   DATE: "date",

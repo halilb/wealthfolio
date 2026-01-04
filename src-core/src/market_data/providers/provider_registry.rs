@@ -1,6 +1,6 @@
 use crate::market_data::market_data_constants::{
     DATA_SOURCE_ALPHA_VANTAGE, DATA_SOURCE_MANUAL, DATA_SOURCE_MARKET_DATA_APP,
-    DATA_SOURCE_METAL_PRICE_API, DATA_SOURCE_YAHOO,
+    DATA_SOURCE_METAL_PRICE_API, DATA_SOURCE_TEFAS, DATA_SOURCE_YAHOO,
 };
 use crate::market_data::market_data_errors::MarketDataError;
 use crate::market_data::market_data_model::{
@@ -11,6 +11,7 @@ use crate::market_data::providers::manual_provider::ManualProvider;
 use crate::market_data::providers::market_data_provider::{AssetProfiler, MarketDataProvider};
 use crate::market_data::providers::marketdata_app_provider::MarketDataAppProvider;
 use crate::market_data::providers::metal_price_api_provider::MetalPriceApiProvider;
+use crate::market_data::providers::tefas_provider::TefasProvider;
 use crate::market_data::providers::yahoo_provider::YahooProvider;
 use crate::secrets::SecretStore;
 use log::{debug, info, warn};
@@ -122,6 +123,13 @@ impl ProviderRegistry {
                         warn!("MetalPriceApi provider '{}' (ID: {}) is enabled but requires an API key, which was not found or resolved. Skipping.", setting.name, setting.id);
                         (None, None)
                     }
+                }
+                DATA_SOURCE_TEFAS => {
+                    let p = Arc::new(TefasProvider::new()?);
+                    (
+                        Some(p as Arc<dyn MarketDataProvider + Send + Sync>),
+                        None,
+                    )
                 }
                 _ => {
                     warn!("Unknown market data provider ID: {}. Skipping.", setting.id);

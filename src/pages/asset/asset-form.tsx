@@ -28,7 +28,7 @@ const assetFormSchema = z.object({
   assetClass: z.string().optional(),
   assetSubClass: z.string().optional(),
   currency: z.string().min(1),
-  dataSource: z.enum([DataSource.YAHOO, DataSource.MANUAL]),
+  dataSource: z.enum([DataSource.YAHOO, DataSource.MANUAL, DataSource.TEFAS]),
   notes: z.string().optional(),
   sectors: z.array(z.string()),
   countries: z.array(z.string()),
@@ -39,6 +39,7 @@ export type AssetFormValues = z.infer<typeof assetFormSchema>;
 const dataSourceOptions: ResponsiveSelectOption[] = [
   { label: "Yahoo Finance", value: DataSource.YAHOO },
   { label: "Manual", value: DataSource.MANUAL },
+  { label: "TEFAS", value: DataSource.TEFAS },
 ];
 
 interface AssetFormProps {
