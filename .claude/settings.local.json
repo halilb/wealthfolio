@@ -11,7 +11,9 @@
       "Bash(cargo build:*)",
       "Bash(cat:*)",
       "Bash(git dfc:*)",
-      "Bash(npm run type-check:*)"
+      "Bash(npm run type-check:*)",
+      "Bash(npx tsc:*)",
+      "Bash(bun:*)"
     ]
   }
 }

@@ -7,7 +7,79 @@ import { QueryKeys } from "@/lib/query-keys";
 import { AccountValuation, PerformanceMetrics, TrackedItem } from "@/lib/types";
 
 /**
- * Calculate TWR and other performance metrics from valuation history
+ * Calculate XIRR (Extended Internal Rate of Return) using Newton-Raphson method
+ * Cash flows: negative for deposits (money out), positive for withdrawals and final value
+ */
+function calculateXirr(
+  cashFlows: { date: Date; amount: number }[],
+  maxIterations: number = 100,
+  tolerance: number = 1e-7,
+): number | null {
+  if (cashFlows.length < 2) return null;
+
+  // Check if all amounts are zero
+  const hasNonZero = cashFlows.some((cf) => cf.amount !== 0);
+  if (!hasNonZero) return 0;
+
+  // Get the first date as reference
+  const startDate = cashFlows[0].date.getTime();
+
+  // Convert dates to year fractions
+  const flows = cashFlows.map((cf) => ({
+    years: (cf.date.getTime() - startDate) / (365.25 * 24 * 60 * 60 * 1000),
+    amount: cf.amount,
+  }));
+
+  // NPV function: sum of amount / (1 + rate)^years
+  const npv = (rate: number): number => {
+    return flows.reduce((sum, flow) => {
+      const discountFactor = Math.pow(1 + rate, flow.years);
+      return sum + flow.amount / discountFactor;
+    }, 0);
+  };
+
+  // Derivative of NPV with respect to rate
+  const npvDerivative = (rate: number): number => {
+    return flows.reduce((sum, flow) => {
+      if (flow.years === 0) return sum;
+      const discountFactor = Math.pow(1 + rate, flow.years + 1);
+      return sum - (flow.years * flow.amount) / discountFactor;
+    }, 0);
+  };
+
+  // Newton-Raphson iteration
+  let rate = 0.1; // Initial guess of 10%
+
+  for (let i = 0; i < maxIterations; i++) {
+    const npvValue = npv(rate);
+    const derivative = npvDerivative(rate);
+
+    if (Math.abs(derivative) < 1e-10) {
+      // Try a different starting point
+      rate = rate > 0 ? -0.1 : 0.5;
+      continue;
+    }
+
+    const newRate = rate - npvValue / derivative;
+
+    // Check for convergence
+    if (Math.abs(newRate - rate) < tolerance) {
+      // Validate result is reasonable (-100% to 1000%)
+      if (newRate > -1 && newRate < 10) {
+        return newRate;
+      }
+      return null;
+    }
+
+    // Bound the rate to prevent divergence
+    rate = Math.max(-0.99, Math.min(10, newRate));
+  }
+
+  return null; // Failed to converge
+}
+
+/**
+ * Calculate TWR, MWR (XIRR), and other performance metrics from valuation history
  * Optionally converts to base currency first
  */
 function calculatePerformanceFromHistory(
@@ -19,6 +91,8 @@ function calculatePerformanceFromHistory(
       returns: [],
       cumulativeTwr: 0,
       annualizedTwr: 0,
+      cumulativeMwr: 0,
+      annualizedMwr: 0,
       volatility: 0,
       maxDrawdown: 0,
     };
@@ -38,33 +112,71 @@ function calculatePerformanceFromHistory(
   let twr = 1;
   const dailyReturns: number[] = [];
 
-  for (let i = 0; i < valuations.length; i++) {
-    if (i === 0) {
-      returns.push({ date: valuations[i].valuationDate, value: 0 });
-      continue;
-    }
+  // Build cash flows for XIRR calculation (always in base currency/USD)
+  // For a date range: treat starting value as initial investment, ending value as final return
+  // Cash flows: negative = money invested, positive = money returned
+  const cashFlows: { date: Date; amount: number }[] = [];
 
+  // First cash flow: starting portfolio value in base currency as initial investment (negative)
+  const firstValuation = history[0];
+  const firstValueBase = firstValuation.totalValue * (firstValuation.fxRateToBase || 1);
+  cashFlows.push({
+    date: new Date(firstValuation.valuationDate),
+    amount: -firstValueBase, // Starting value as outflow (as if investing this amount)
+  });
+
+  for (let i = 1; i < valuations.length; i++) {
     const prev = valuations[i - 1];
     const curr = valuations[i];
     const cf = curr.netContribution - prev.netContribution;
 
+    // TWR calculation - original formula (cash flow adjusted end value / start value)
     if (prev.totalValue > 0) {
       const dailyReturn = (curr.totalValue - cf) / prev.totalValue;
       twr *= dailyReturn;
       dailyReturns.push(dailyReturn - 1);
     }
 
+    // For XIRR: Convert cash flow to base currency using the FX rate at the time of the transaction
+    // This is the key fix: each cash flow is converted using its own FX rate, not cumulative conversion
+    const currHistory = history[i];
+    const cfLocal = currHistory.netContribution - history[i - 1].netContribution;
+    if (cfLocal !== 0) {
+      // Convert the local currency cash flow to base currency using the rate at transaction time
+      const cfBase = cfLocal * (currHistory.fxRateToBase || 1);
+      cashFlows.push({
+        date: new Date(currHistory.valuationDate),
+        amount: -cfBase, // Deposit is negative (outflow), withdrawal is positive (inflow)
+      });
+    }
+
     returns.push({ date: curr.valuationDate, value: twr - 1 });
   }
 
+  // Add initial return point
+  returns.unshift({ date: valuations[0].valuationDate, value: 0 });
+
+  // Final cash flow: ending portfolio value in base currency (positive - money returned)
+  const lastValuation = history[history.length - 1];
+  const lastValueBase = lastValuation.totalValue * (lastValuation.fxRateToBase || 1);
+  cashFlows.push({
+    date: new Date(lastValuation.valuationDate),
+    amount: lastValueBase, // Final value as inflow (in base currency)
+  });
+
   const cumulativeTwr = twr - 1;
 
-  // Calculate annualized TWR
+  // Calculate annualized TWR (same as original)
   const firstDate = new Date(valuations[0].valuationDate);
   const lastDate = new Date(valuations[valuations.length - 1].valuationDate);
   const days = Math.max(1, (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
   const years = days / 365;
   const annualizedTwr = years > 0 ? Math.pow(1 + cumulativeTwr, 1 / years) - 1 : 0;
+
+  // Calculate XIRR (true money-weighted return with proper cash flow timing)
+  const xirr = calculateXirr(cashFlows);
+  const annualizedMwr = xirr !== null && isFinite(xirr) ? xirr : 0;
+  const cumulativeMwr = years > 0 ? Math.pow(1 + annualizedMwr, years) - 1 : annualizedMwr;
 
   // Calculate volatility
   let volatility = 0;
@@ -88,6 +200,8 @@ function calculatePerformanceFromHistory(
     returns,
     cumulativeTwr,
     annualizedTwr,
+    cumulativeMwr,
+    annualizedMwr,
     volatility,
     maxDrawdown,
   };

@@ -45,9 +45,19 @@ const ranges = [
     getValue: () => ({ from: subYears(new Date(), 1), to: new Date() }),
   },
   {
+    label: "2Y",
+    name: "Last 2 Years",
+    getValue: () => ({ from: subYears(new Date(), 2), to: new Date() }),
+  },
+  {
     label: "3Y",
     name: "Last 3 Years",
     getValue: () => ({ from: subYears(new Date(), 3), to: new Date() }),
+  },
+  {
+    label: "4Y",
+    name: "Last 4 Years",
+    getValue: () => ({ from: subYears(new Date(), 4), to: new Date() }),
   },
   {
     label: "5Y",

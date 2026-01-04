@@ -195,6 +195,7 @@ const AccountPage = () => {
   };
 
   // Calculate USD-adjusted performance metrics from displayHistory
+  // Note: XIRR (cumulativeMwr/annualizedMwr) from accountPerformance is already calculated in USD
   const displayPerformance = useMemo((): PerformanceMetrics | null => {
     if (!showInUsd || !accountPerformance) return accountPerformance;
     if (!displayHistory || displayHistory.length < 2) return accountPerformance;
@@ -241,8 +242,9 @@ const AccountPage = () => {
       ...accountPerformance,
       cumulativeTwr: frontendSimpleReturn,
       annualizedTwr,
-      cumulativeMwr: frontendSimpleReturn, // Use TWR as approximation for MWR
-      annualizedMwr: annualizedTwr,
+      // Keep XIRR values from accountPerformance - they're already calculated in USD
+      cumulativeMwr: accountPerformance.cumulativeMwr,
+      annualizedMwr: accountPerformance.annualizedMwr,
       volatility,
       maxDrawdown,
       currency: "USD",

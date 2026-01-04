@@ -69,9 +69,8 @@ export const PerformanceGrid: React.FC<PerformanceGridProps> = ({
               className="border-muted/30 bg-muted/30 rounded-md border"
             />
             <MetricDisplay
-              label="Money Weighted Return"
-              value={cumulativeMwr}
-              annualizedValue={annualizedMwr}
+              label="XIRR"
+              value={annualizedMwr}
               infoText={MONEY_WEIGHTED_RETURN_INFO}
               isPercentage={true}
               className="border-muted/30 bg-muted/30 rounded-md border"

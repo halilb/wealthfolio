@@ -3,6 +3,7 @@ import {
   ANNUALIZED_RETURN_INFO as annualizedReturnInfo,
   MAX_DRAWDOWN_INFO as maxDrawdownInfo,
   MetricLabelWithInfo,
+  MONEY_WEIGHTED_RETURN_INFO as xirrInfo,
   TIME_WEIGHTED_RETURN_INFO as totalReturnInfo,
   VOLATILITY_INFO as volatilityInfo,
 } from "@/components/metric-display";
@@ -287,11 +288,15 @@ export default function PerformancePage() {
     const found = performanceData.find((item) => item?.id === targetId);
     if (!found) return null;
     const name = selectedItems.find((item) => item.id === found.id)?.name ?? "Unknown";
+    const trackedItem = selectedItems.find((item) => item.id === found.id);
     return {
       id: found.id,
       name: name,
+      type: trackedItem?.type ?? "account",
       totalReturn: Number(found.cumulativeTwr),
       annualizedReturn: Number(found.annualizedTwr),
+      xirr: Number(found.cumulativeMwr ?? 0),
+      annualizedXirr: Number(found.annualizedMwr ?? 0),
       volatility: Number(found.volatility),
       maxDrawdown: Number(found.maxDrawdown),
     };
@@ -549,6 +554,30 @@ export default function PerformancePage() {
                               </div>
                             </CarouselItem>
 
+                            {selectedItemData?.type === "account" && (
+                              <CarouselItem className="basis-[38%] pl-2 md:pl-4">
+                                <div className="bg-muted/30 flex flex-col gap-0.5 rounded-lg px-3 py-2">
+                                  <span className="text-muted-foreground text-[9px] font-medium tracking-wide uppercase">
+                                    XIRR
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "text-base font-bold",
+                                      selectedItemData && selectedItemData.annualizedXirr >= 0
+                                        ? "text-success"
+                                        : "text-destructive",
+                                    )}
+                                  >
+                                    <GainPercent
+                                      value={selectedItemData?.annualizedXirr ?? 0}
+                                      animated={true}
+                                      className="text-base"
+                                    />
+                                  </span>
+                                </div>
+                              </CarouselItem>
+                            )}
+
                             <CarouselItem className="basis-[38%] pl-2 md:pl-4">
                               <div className="bg-muted/30 flex flex-col gap-0.5 rounded-lg px-3 py-2">
                                 <span className="text-muted-foreground text-[9px] font-medium tracking-wide uppercase">
@@ -588,7 +617,14 @@ export default function PerformancePage() {
                         </Carousel>
                       ) : (
                         /* Desktop metrics */
-                        <div className="grid grid-cols-2 gap-3 rounded-lg p-2 backdrop-blur-sm sm:gap-4 md:grid-cols-4 md:gap-6">
+                        <div
+                          className={cn(
+                            "grid grid-cols-2 gap-3 rounded-lg p-2 backdrop-blur-sm sm:gap-4 md:gap-6",
+                            selectedItemData?.type === "account"
+                              ? "md:grid-cols-5"
+                              : "md:grid-cols-4",
+                          )}
+                        >
                           <div className="flex flex-col items-center space-y-0.5 sm:space-y-1">
                             <MetricLabelWithInfo label="Total Return" infoText={totalReturnInfo} />
                             <div className="flex items-baseline justify-center">
@@ -629,6 +665,27 @@ export default function PerformancePage() {
                               </span>
                             </div>
                           </div>
+
+                          {selectedItemData?.type === "account" && (
+                            <div className="flex flex-col items-center space-y-0.5 sm:space-y-1">
+                              <MetricLabelWithInfo label="XIRR" infoText={xirrInfo} />
+                              <div className="flex items-baseline justify-center">
+                                <span
+                                  className={`text-base sm:text-lg ${
+                                    selectedItemData && selectedItemData.annualizedXirr >= 0
+                                      ? "text-success"
+                                      : "text-destructive"
+                                  }`}
+                                >
+                                  <GainPercent
+                                    value={selectedItemData?.annualizedXirr ?? 0}
+                                    animated={true}
+                                    className="text-base sm:text-lg"
+                                  />
+                                </span>
+                              </div>
+                            </div>
+                          )}
 
                           <div className="flex flex-col items-center space-y-0.5 sm:space-y-1">
                             <MetricLabelWithInfo label="Volatility" infoText={volatilityInfo} />
