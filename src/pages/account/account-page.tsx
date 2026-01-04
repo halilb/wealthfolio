@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Sheet,
   SheetContent,
@@ -37,6 +38,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useUsdDisplay } from "@/hooks/use-usd-display";
 import { useValuationHistory } from "@/hooks/use-valuation-history";
 import { AccountType } from "@/lib/constants";
 import { QueryKeys } from "@/lib/query-keys";
@@ -94,6 +96,7 @@ const AccountPage = () => {
 
   const { accounts, isLoading: isAccountsLoading } = useAccounts();
   const account = useMemo(() => accounts?.find((acc) => acc.id === id), [accounts, id]);
+  const { isUsdDisplay, toggleUsdDisplay } = useUsdDisplay();
 
   // Query holdings to check if account has any assets
   const { data: holdings, isLoading: isHoldingsLoading } = useQuery<Holding[], Error>({
@@ -139,23 +142,43 @@ const AccountPage = () => {
     id,
   );
 
-  // Calculate gainLossAmount and simpleReturn from valuationHistory
+  // Determine if we should show USD (only if account is non-USD and user toggled it)
+  const showInUsd = isUsdDisplay && account?.currency !== "USD";
+
+  // Convert valuation history to USD when USD display is active
+  const displayHistory = useMemo(() => {
+    if (!showInUsd || !valuationHistory) return valuationHistory;
+    return valuationHistory.map((v) => ({
+      ...v,
+      totalValue: v.totalValue * (v.fxRateToBase || 1),
+      netContribution: v.netContribution * (v.fxRateToBase || 1),
+      investmentMarketValue: v.investmentMarketValue * (v.fxRateToBase || 1),
+      costBasis: v.costBasis * (v.fxRateToBase || 1),
+      cashBalance: v.cashBalance * (v.fxRateToBase || 1),
+      accountCurrency: v.baseCurrency,
+    }));
+  }, [valuationHistory, showInUsd]);
+
+  // Current display currency
+  const displayCurrency = showInUsd ? "USD" : (account?.currency ?? "USD");
+
+  // Calculate gainLossAmount and simpleReturn from displayHistory (USD-converted when enabled)
   const { gainLossAmount: frontendGainLossAmount, simpleReturn: frontendSimpleReturn } =
     useMemo(() => {
-      return calculatePerformanceMetrics(valuationHistory, false);
-    }, [valuationHistory, id]);
+      return calculatePerformanceMetrics(displayHistory, selectedIntervalCode === "ALL");
+    }, [displayHistory, selectedIntervalCode, showInUsd]);
 
   const chartData: HistoryChartData[] = useMemo(() => {
-    if (!valuationHistory) return [];
-    return valuationHistory.map((valuation: AccountValuation) => ({
+    if (!displayHistory) return [];
+    return displayHistory.map((valuation: AccountValuation) => ({
       date: valuation.valuationDate,
       totalValue: valuation.totalValue,
       netContribution: valuation.netContribution,
       currency: valuation.accountCurrency,
     }));
-  }, [valuationHistory]);
+  }, [displayHistory]);
 
-  const currentValuation = valuationHistory?.[valuationHistory.length - 1];
+  const currentValuation = displayHistory?.[displayHistory.length - 1];
 
   const isLoading = isAccountsLoading || isValuationHistoryLoading;
   const isDetailsLoading = isLoading || isPerformanceHistoryLoading;
@@ -170,7 +193,66 @@ const AccountPage = () => {
     setDateRange(range);
   };
 
+  // Calculate USD-adjusted performance metrics from displayHistory
+  const displayPerformance = useMemo(() => {
+    if (!showInUsd || !accountPerformance) return accountPerformance;
+    if (!displayHistory || displayHistory.length < 2) return accountPerformance;
+
+    // Calculate days for annualization
+    const firstDate = new Date(displayHistory[0].valuationDate);
+    const lastDate = new Date(displayHistory[displayHistory.length - 1].valuationDate);
+    const days = Math.max(1, (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+    const years = days / 365;
+
+    // Annualize the TWR
+    const annualizedTwr = years > 0 ? Math.pow(1 + frontendSimpleReturn, 1 / years) - 1 : 0;
+
+    // Calculate volatility from daily returns
+    let volatility = 0;
+    if (displayHistory.length > 2) {
+      const dailyReturns: number[] = [];
+      for (let i = 1; i < displayHistory.length; i++) {
+        const prev = displayHistory[i - 1];
+        const curr = displayHistory[i];
+        const cf = curr.netContribution - prev.netContribution;
+        if (prev.totalValue > 0) {
+          const dailyReturn = (curr.totalValue - cf) / prev.totalValue - 1;
+          dailyReturns.push(dailyReturn);
+        }
+      }
+      if (dailyReturns.length > 1) {
+        const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+        const variance = dailyReturns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (dailyReturns.length - 1);
+        volatility = Math.sqrt(variance * 252); // Annualized volatility
+      }
+    }
+
+    // Calculate max drawdown
+    let maxDrawdown = 0;
+    let peak = displayHistory[0].totalValue;
+    for (const v of displayHistory) {
+      if (v.totalValue > peak) peak = v.totalValue;
+      const drawdown = peak > 0 ? (peak - v.totalValue) / peak : 0;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    }
+
+    return {
+      ...accountPerformance,
+      cumulativeTwr: frontendSimpleReturn,
+      annualizedTwr,
+      cumulativeMwr: frontendSimpleReturn, // Use TWR as approximation for MWR
+      annualizedMwr: annualizedTwr,
+      volatility,
+      maxDrawdown,
+      currency: "USD",
+    };
+  }, [showInUsd, accountPerformance, displayHistory, frontendSimpleReturn]);
+
   const percentageToDisplay = useMemo(() => {
+    // When showing in USD, always use frontend-calculated return (from USD-converted history)
+    if (showInUsd) {
+      return frontendSimpleReturn;
+    }
     if (selectedIntervalCode === "ALL") {
       return frontendSimpleReturn;
     }
@@ -179,7 +261,7 @@ const AccountPage = () => {
       return accountPerformance.cumulativeMwr ?? 0;
     }
     return 0; // Default if no specific logic matches or data is unavailable
-  }, [accountPerformance, selectedIntervalCode, frontendSimpleReturn]);
+  }, [accountPerformance, selectedIntervalCode, frontendSimpleReturn, showInUsd]);
 
   const handleAccountSwitch = (selectedAccount: Account) => {
     navigate(`/accounts/${selectedAccount.id}`);
@@ -194,6 +276,22 @@ const AccountPage = () => {
         actions={
           <>
             <div className="hidden items-center gap-2 sm:flex">
+              {account?.currency !== "USD" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={showInUsd ? "default" : "outline"}
+                      size="icon"
+                      onClick={toggleUsdDisplay}
+                    >
+                      <Icons.DollarSign className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Show values in {showInUsd ? "Account Currency" : "Base Currency"}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Button
                 variant="outline"
                 size="icon"
@@ -219,6 +317,18 @@ const AccountPage = () => {
                 title="Account Actions"
                 description="Manage this account"
                 actions={[
+                  ...(account?.currency !== "USD"
+                    ? [
+                        {
+                          icon: "DollarSign" as const,
+                          label: showInUsd ? "Show in Account Currency" : "Show in USD",
+                          description: showInUsd
+                            ? "Display values in original currency"
+                            : "Convert all values to USD",
+                          onClick: toggleUsdDisplay,
+                        },
+                      ]
+                    : []),
                   {
                     icon: "Import",
                     label: "Import CSV",
@@ -373,14 +483,14 @@ const AccountPage = () => {
                           <p className="pt-3 text-xl font-bold">
                             <PrivacyAmount
                               value={currentValuation?.totalValue ?? 0}
-                              currency={account?.currency ?? "USD"}
+                              currency={displayCurrency}
                             />
                           </p>
                           <div className="flex space-x-3 text-sm">
                             <GainAmount
                               className="text-sm font-light"
                               value={frontendGainLossAmount}
-                              currency={account?.currency ?? "USD"}
+                              currency={displayCurrency}
                               displayCurrency={false}
                             />
                             <div className="border-muted-foreground my-1 border-r pr-2" />
@@ -416,9 +526,10 @@ const AccountPage = () => {
               <div className="flex flex-col space-y-4">
                 <AccountMetrics
                   valuation={currentValuation}
-                  performance={accountPerformance}
+                  performance={displayPerformance}
                   className="grow"
                   isLoading={isDetailsLoading || isPerformanceHistoryLoading}
+                  displayCurrency={displayCurrency}
                 />
                 <AccountContributionLimit accountId={id} />
               </div>

@@ -89,6 +89,7 @@ interface AccountMetricsProps {
   performance?: PerformanceMetrics | null;
   className?: string;
   isLoading?: boolean;
+  displayCurrency?: string;
 }
 
 const AccountMetrics: React.FC<AccountMetricsProps> = ({
@@ -96,6 +97,7 @@ const AccountMetrics: React.FC<AccountMetricsProps> = ({
   performance,
   className,
   isLoading,
+  displayCurrency: displayCurrencyProp,
 }) => {
   if (isLoading || !performance || !valuation)
     return (
@@ -129,7 +131,7 @@ const AccountMetrics: React.FC<AccountMetricsProps> = ({
       </Card>
     );
 
-  const displayCurrency = valuation?.accountCurrency || valuation?.baseCurrency;
+  const displayCurrency = displayCurrencyProp || valuation?.accountCurrency || valuation?.baseCurrency;
 
   const rows = [
     {

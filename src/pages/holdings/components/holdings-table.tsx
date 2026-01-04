@@ -8,15 +8,11 @@ import { GainPercent } from "@wealthfolio/ui";
 
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
-import { useSettingsContext } from "@/lib/settings-provider";
+import { useUsdDisplay } from "@/hooks/use-usd-display";
 import { Holding } from "@/lib/types";
-import { AmountDisplay, QuantityDisplay } from "@wealthfolio/ui";
-import { useState } from "react";
+import { AmountDisplay, AnimatedToggleGroup, QuantityDisplay } from "@wealthfolio/ui";
 import { useNavigate } from "react-router-dom";
-
-import { AnimatedToggleGroup } from "@wealthfolio/ui";
 
 // Helper function to get display value and currency based on toggle state
 const getDisplayValueAndCurrency = (
@@ -54,17 +50,10 @@ export const HoldingsTable = ({
   setShowTotalReturn?: (value: boolean) => void;
 }) => {
   const { isBalanceHidden } = useBalancePrivacy();
-  const { settings } = useSettingsContext();
-  const [showConvertedValues, setShowConvertedValues] = useState(false);
+  const { isUsdDisplay } = useUsdDisplay();
 
-  const baseCurrency = settings?.baseCurrency ?? holdings[0]?.baseCurrency;
-  const hasMultipleCurrencies = holdings.some((holding) => {
-    if (!baseCurrency || !holding.localCurrency) {
-      return false;
-    }
-
-    return holding.localCurrency.toUpperCase() !== baseCurrency.toUpperCase();
-  });
+  // Use USD display state for showing converted values
+  const showConvertedValues = isUsdDisplay;
 
   if (isLoading) {
     return (
@@ -116,11 +105,11 @@ export const HoldingsTable = ({
         defaultSorting={[{ id: "symbol", desc: false }]}
         scrollable={true}
         toolbarActions={
-          <div className="mr-2 flex items-center gap-2">
-            {setShowTotalReturn && (
+          setShowTotalReturn ? (
+            <div className="mr-2 flex items-center gap-2">
               <AnimatedToggleGroup
                 value={showTotalReturn ? "total" : "daily"}
-                onValueChange={(value) => setShowTotalReturn(value === "total")}
+                onValueChange={(value: string) => setShowTotalReturn(value === "total")}
                 items={[
                   { value: "total", label: "Total" },
                   { value: "daily", label: "Daily" },
@@ -128,29 +117,8 @@ export const HoldingsTable = ({
                 size="xs"
                 rounded="md"
               />
-            )}
-            {hasMultipleCurrencies && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setShowConvertedValues(!showConvertedValues)}
-                    className="h-8 w-8 rounded-lg"
-                  >
-                    {showConvertedValues ? (
-                      <Icons.Globe className="h-4 w-4" />
-                    ) : (
-                      <Icons.DollarSign className="h-4 w-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Show values in {showConvertedValues ? "Asset Currency" : "Base Currency"}</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
+            </div>
+          ) : undefined
         }
       />
     </div>

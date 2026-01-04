@@ -10,7 +10,8 @@
       "Bash(cargo test:*)",
       "Bash(cargo build:*)",
       "Bash(cat:*)",
-      "Bash(git dfc:*)"
+      "Bash(git dfc:*)",
+      "Bash(npm run type-check:*)"
     ]
   }
 }
