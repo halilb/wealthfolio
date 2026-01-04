@@ -47,6 +47,7 @@ import {
   AccountValuation,
   DateRange,
   Holding,
+  PerformanceMetrics,
   TimePeriod,
   TrackedItem,
 } from "@/lib/types";
@@ -135,7 +136,7 @@ const AccountPage = () => {
       dateRange: dateRange,
     });
 
-  const accountPerformance = performanceResponse?.[0] || null;
+  const accountPerformance = (performanceResponse?.[0] as PerformanceMetrics | undefined) ?? null;
 
   const { valuationHistory, isLoading: isValuationHistoryLoading } = useValuationHistory(
     dateRange,
@@ -194,7 +195,7 @@ const AccountPage = () => {
   };
 
   // Calculate USD-adjusted performance metrics from displayHistory
-  const displayPerformance = useMemo(() => {
+  const displayPerformance = useMemo((): PerformanceMetrics | null => {
     if (!showInUsd || !accountPerformance) return accountPerformance;
     if (!displayHistory || displayHistory.length < 2) return accountPerformance;
 

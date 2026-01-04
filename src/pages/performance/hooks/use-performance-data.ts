@@ -1,10 +1,97 @@
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
-import { calculatePerformanceHistory } from "@/commands/portfolio";
-import { useRef } from "react";
+import { calculatePerformanceHistory, getHistoricalValuations } from "@/commands/portfolio";
+import { useMemo, useRef } from "react";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { QueryKeys } from "@/lib/query-keys";
-import { TrackedItem } from "@/lib/types";
+import { AccountValuation, PerformanceMetrics, TrackedItem } from "@/lib/types";
+
+/**
+ * Calculate TWR and other performance metrics from valuation history
+ * Optionally converts to base currency first
+ */
+function calculatePerformanceFromHistory(
+  history: AccountValuation[],
+  convertToBase: boolean = false,
+): Partial<PerformanceMetrics> {
+  if (!history?.length) {
+    return {
+      returns: [],
+      cumulativeTwr: 0,
+      annualizedTwr: 0,
+      volatility: 0,
+      maxDrawdown: 0,
+    };
+  }
+
+  // Convert to base currency if needed
+  const valuations = convertToBase
+    ? history.map((v) => ({
+        ...v,
+        totalValue: v.totalValue * (v.fxRateToBase || 1),
+        netContribution: v.netContribution * (v.fxRateToBase || 1),
+      }))
+    : history;
+
+  // Calculate daily returns and cumulative TWR
+  const returns: { date: string; value: number }[] = [];
+  let twr = 1;
+  const dailyReturns: number[] = [];
+
+  for (let i = 0; i < valuations.length; i++) {
+    if (i === 0) {
+      returns.push({ date: valuations[i].valuationDate, value: 0 });
+      continue;
+    }
+
+    const prev = valuations[i - 1];
+    const curr = valuations[i];
+    const cf = curr.netContribution - prev.netContribution;
+
+    if (prev.totalValue > 0) {
+      const dailyReturn = (curr.totalValue - cf) / prev.totalValue;
+      twr *= dailyReturn;
+      dailyReturns.push(dailyReturn - 1);
+    }
+
+    returns.push({ date: curr.valuationDate, value: twr - 1 });
+  }
+
+  const cumulativeTwr = twr - 1;
+
+  // Calculate annualized TWR
+  const firstDate = new Date(valuations[0].valuationDate);
+  const lastDate = new Date(valuations[valuations.length - 1].valuationDate);
+  const days = Math.max(1, (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+  const years = days / 365;
+  const annualizedTwr = years > 0 ? Math.pow(1 + cumulativeTwr, 1 / years) - 1 : 0;
+
+  // Calculate volatility
+  let volatility = 0;
+  if (dailyReturns.length > 1) {
+    const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+    const variance =
+      dailyReturns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (dailyReturns.length - 1);
+    volatility = Math.sqrt(variance * 252);
+  }
+
+  // Calculate max drawdown
+  let maxDrawdown = 0;
+  let peak = valuations[0].totalValue;
+  for (const v of valuations) {
+    if (v.totalValue > peak) peak = v.totalValue;
+    const drawdown = peak > 0 ? (peak - v.totalValue) / peak : 0;
+    if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+  }
+
+  return {
+    returns,
+    cumulativeTwr,
+    annualizedTwr,
+    volatility,
+    maxDrawdown,
+  };
+}
 
 /**
  * Hook to calculate cumulative returns for a list of comparison items.
@@ -65,40 +152,108 @@ export function useCalculatePerformanceHistory({
   // Use the effective start date if available, otherwise use the original start date (potentially undefined)
   const startDateToUse = effectiveStartDateRef.current || startDate;
 
-  const performanceQueries = useQueries({
-    queries: selectedItems.map((item) => ({
-      queryKey: [QueryKeys.PERFORMANCE_HISTORY, item.type, item.id, startDateToUse, endDate],
-      queryFn: () => calculatePerformanceHistory(item.type, item.id, startDateToUse!, endDate!),
-      // Enable query only if essential item identifiers AND dates are present.
-      enabled: !!item.id && !!item.type && !!startDateToUse && !!endDate,
+  // Separate accounts and symbols
+  const accountItems = selectedItems.filter((item) => item.type === "account");
+  const symbolItems = selectedItems.filter((item) => item.type === "symbol");
+
+  // Fetch valuation history for accounts (to calculate base currency returns)
+  const valuationQueries = useQueries({
+    queries: accountItems.map((item) => ({
+      queryKey: [QueryKeys.HISTORY_VALUATION, "base", item.id, startDateToUse, endDate],
+      queryFn: () => getHistoricalValuations(item.id, startDateToUse!, endDate!),
+      enabled: !!item.id && !!startDateToUse && !!endDate,
       staleTime: 30 * 1000,
       retry: false,
       placeholderData: keepPreviousData,
     })),
   });
 
-  const isLoading = performanceQueries.some((query) => query.isLoading);
-  const hasErrors = performanceQueries.some((query) => query.isError);
-  const errorMessages = performanceQueries
-    .filter((query) => query.isError)
-    .map((query) => query.error)
-    .filter(Boolean)
-    .map((error) => (error instanceof Error ? error.message : String(error)));
+  // Fetch performance data for symbols (benchmarks) - use backend calculation
+  const symbolQueries = useQueries({
+    queries: symbolItems.map((item) => ({
+      queryKey: [QueryKeys.PERFORMANCE_HISTORY, item.type, item.id, startDateToUse, endDate],
+      queryFn: () => calculatePerformanceHistory(item.type, item.id, startDateToUse!, endDate!),
+      enabled: !!item.id && !!startDateToUse && !!endDate,
+      staleTime: 30 * 1000,
+      retry: false,
+      placeholderData: keepPreviousData,
+    })),
+  });
 
-  // Format chart data directly from query results
-  const chartData = performanceQueries
-    .map((query, index) => {
-      if (query.isError || !query.data) return null;
+  const isLoading =
+    valuationQueries.some((query) => query.isLoading) ||
+    symbolQueries.some((query) => query.isLoading);
+  const hasErrors =
+    valuationQueries.some((query) => query.isError) ||
+    symbolQueries.some((query) => query.isError);
+  const errorMessages = [
+    ...valuationQueries
+      .filter((query) => query.isError)
+      .map((query) => query.error)
+      .filter(Boolean)
+      .map((error) => (error instanceof Error ? error.message : String(error))),
+    ...symbolQueries
+      .filter((query) => query.isError)
+      .map((query) => query.error)
+      .filter(Boolean)
+      .map((error) => (error instanceof Error ? error.message : String(error))),
+  ];
 
-      const item = selectedItems[index];
-      return {
-        ...query.data,
-        id: item.id,
-        type: item.type,
-        name: item.type === "symbol" ? `${item.name} (${item.id})` : item.name,
-      };
-    })
-    .filter(Boolean);
+  // Calculate base currency performance for accounts from valuation history
+  const accountChartData = useMemo(() => {
+    return valuationQueries
+      .map((query, index) => {
+        if (query.isError || !query.data?.length) return null;
+
+        const item = accountItems[index];
+        const history = query.data;
+
+        // Check if account needs base currency conversion
+        const needsConversion =
+          history.length > 0 && history[0].accountCurrency !== history[0].baseCurrency;
+
+        const performance = calculatePerformanceFromHistory(history, needsConversion);
+
+        return {
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          currency: history[0]?.baseCurrency || "USD",
+          ...performance,
+        };
+      })
+      .filter(Boolean);
+  }, [valuationQueries, accountItems]);
+
+  // Format symbol chart data from query results
+  const symbolChartData = useMemo(() => {
+    return symbolQueries
+      .map((query, index) => {
+        if (query.isError || !query.data) return null;
+
+        const item = symbolItems[index];
+        return {
+          ...query.data,
+          id: item.id,
+          type: item.type,
+          name: `${item.name} (${item.id})`,
+        };
+      })
+      .filter(Boolean);
+  }, [symbolQueries, symbolItems]);
+
+  // Merge account and symbol data, maintaining original order
+  const chartData = useMemo(() => {
+    return selectedItems
+      .map((item) => {
+        if (item.type === "account") {
+          return accountChartData.find((d) => d?.id === item.id) || null;
+        } else {
+          return symbolChartData.find((d) => d?.id === item.id) || null;
+        }
+      })
+      .filter(Boolean);
+  }, [selectedItems, accountChartData, symbolChartData]);
 
   // Process performance data to determine effective start date (only once per data set)
   if (
@@ -146,7 +301,6 @@ export function useCalculatePerformanceHistory({
     isLoading,
     hasErrors,
     errorMessages,
-    queries: performanceQueries,
     effectiveStartDate: effectiveStartDateRef.current,
     formattedStartDate: startDate,
     formattedEndDate: endDate,
